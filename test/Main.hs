@@ -1,3 +1,4 @@
+{-# language RankNTypes #-}
 module Main where
 
 import Control.Concurrent
@@ -69,9 +70,9 @@ import Network.PeerDiscovery.Types
 -- | Start multiple peer discovery instances.
 withPeerDiscoveries
   :: Config
-  -> StmRouter
+  -> CommunicationMethod cm
   -> [(Bool, PortNumber)]
-  -> ([PeerDiscovery StmRouter] -> IO r)
+  -> ([PeerDiscovery cm] -> IO r)
   -> IO r
 withPeerDiscoveries conf router connInfos k = go [] connInfos
   where
@@ -80,13 +81,13 @@ withPeerDiscoveries conf router connInfos k = go [] connInfos
       ((joinNetwork, port):rest) -> do
         let C.CryptoPassed skey = C.secretKey . BS.pack . take C.secretKeySize
                                 . randoms . mkStdGen $ fromIntegral port
-        withPeerDiscovery conf joinNetwork (Just skey) (stmRouter router) port $ \pd ->
+        withPeerDiscovery conf joinNetwork (Just skey) router port $ \pd ->
           go (pd : acc) rest
 
-main :: IO ()
-main = withStmRouter $ \router -> do
+testWithComms :: CommunicationMethod cm -> IO ()
+testWithComms cm = do
   let connInfos = map (True, ) [3000..3500]
-  withPeerDiscoveries defaultConfig router connInfos $ \pds -> do
+  withPeerDiscoveries defaultConfig cm connInfos $ \pds -> do
 
     let nodes = let xs = map (\pd -> Node { nodeId = mkPeerId $ pdPublicKey pd
                                           , nodePeer = pdBindAddr pd
@@ -112,3 +113,6 @@ main = withStmRouter $ \router -> do
       =<< peerLookup pd1 targetId
 
     void getLine
+
+main :: IO ()
+main = withStmRouter $ \router -> testWithComms (stmRouter router)
