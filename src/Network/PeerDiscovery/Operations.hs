@@ -31,6 +31,7 @@ bootstrap
   :: PeerDiscovery cm
   -> Node -- ^ Initial peer
   -> IO Bool
+-- What does the return value mean????
 bootstrap pd node = do
   bootstrapState <- atomically $ readTVar (pdBootstrapState pd) >>= \case
     BootstrapInProgress -> retry
@@ -38,7 +39,11 @@ bootstrap pd node = do
       writeTVar (pdBootstrapState pd) BootstrapInProgress
       return bs
   (`onException` resetBootstrap) $ do
-    sendRequestSync pd (Ping Nothing) node (result bootstrapState) $ \Pong -> do
+    -- DF: If the bootstrap state was originally BootstrapDone, and pinging
+    -- fails, then we return True.
+    sendRequestSync pd (Ping Nothing) node
+        (do resetBootstrap
+            return $! bootstrapState == BootstrapDone) $ \Pong -> do
       readMVar (pdPublicPort pd) >>= \case
         Nothing   -> return ()
         Just port -> do
@@ -61,14 +66,14 @@ bootstrap pd node = do
         targetId <- randomPeerId
         -- Populate part of the routing table holding nodes far from us.
         if testPeerIdBit myId 0 /= testPeerIdBit targetId 0
-          then peerLookup pd targetId >> result BootstrapDone
+          then do
+                 _ <- peerLookup pd targetId
+                 resetBootstrap
+                 return True
           else loop
   where
     resetBootstrap =
       atomically $ writeTVar (pdBootstrapState pd) BootstrapNeeded
-    result st = do
-      resetBootstrap
-      return $! st == BootstrapDone
 
 ----------------------------------------
 
