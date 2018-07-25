@@ -86,13 +86,22 @@ withPeerDiscoveries conf router connInfos k = go [] connInfos
 
 testWithComms :: CommunicationMethod cm -> IO ()
 testWithComms cm = do
-  let connInfos = map (True, ) [3000..3500]
+  let connInfos = map (True, ) $ [3000..3250] ++ [3252..3500]
   withPeerDiscoveries defaultConfig cm connInfos $ \pds -> do
 
     let nodes = let xs = map (\pd -> Node { nodeId = mkPeerId $ pdPublicKey pd
                                           , nodePeer = pdBindAddr pd
                                           }) pds
                 in last xs : init xs
+    extra_done <- newEmptyMVar
+    forkIO $ withPeerDiscovery defaultConfig True Nothing cm 3251 $ \pd -> do
+      putStrLn "Extra joining"
+      _ <- bootstrap pd (nodes !! 2)
+      let target_id = nodeId $ nodes !! 100
+      threadDelay 7000000
+      close_peers <- peerLookup pd target_id
+      putMVar extra_done $ map (\x -> distance target_id (nodeId x)) close_peers
+
     zipWithM_ (\pd node -> do
                   putStrLn $ "Bootstrapping " ++ show (pdBindAddr pd)
                   True <- bootstrap pd node
@@ -112,7 +121,11 @@ testWithComms cm = do
     pPrint . map (\x -> let d = distance targetId (nodeId x) in (length (show d), d, x))
       =<< peerLookup pd1 targetId
 
+    dn <- readMVar extra_done
+    putStrLn $ "extra done: " ++ show dn
+
     void getLine
+
 
 main :: IO ()
 main = withStmRouter $ \router -> testWithComms (stmRouter router)
