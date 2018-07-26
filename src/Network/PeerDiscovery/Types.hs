@@ -276,8 +276,8 @@ data FindNode = FindNode
   , fnTargetId   :: !PeerId
   } deriving (Eq, Show)
 
-data Ping = Ping
-  { pingReturnPort :: !(Maybe PortNumber)
+newtype Ping = Ping
+  { pingReturnPort :: Maybe PortNumber
   } deriving (Eq, Show)
 
 instance Serialise Request where
@@ -304,7 +304,7 @@ data Response = ReturnNodesR !ReturnNodes
               | PongR !Pong
   deriving (Eq, Show)
 
-data ReturnNodes = ReturnNodes ![Node]
+data ReturnNodes = ReturnNodes [Node]
   deriving (Eq, Show)
 
 data Pong = Pong
@@ -369,8 +369,8 @@ data ResponseHandler = forall r. Typeable r => ResponseHandler
   { rhRequest          :: !Request
   , rhRecipient        :: !Node
   , rhTimeoutHandlerId :: !ThreadId
-  , rhOnFailure        :: !(IO ())
-  , rhHandler          :: !(r -> IO ())
+  , rhOnFailure        :: IO ()
+  , rhHandler          :: r -> IO ()
   }
 
 -- | Map of response handlers.
@@ -378,8 +378,8 @@ type ResponseHandlers = MVar (M.Map RpcId ResponseHandler)
 
 -- | Abstract interface for communication between peer discovery instances.
 data CommInterface = CommInterface
-  { recvFrom :: !(IO (Peer, Signal))
-  , sendTo   :: !(Peer -> Signal -> IO ())
+  { recvFrom :: IO (Peer, Signal)
+  , sendTo   :: Peer -> Signal -> IO ()
   }
 
 data BootstrapState = BootstrapNeeded | BootstrapInProgress | BootstrapDone
