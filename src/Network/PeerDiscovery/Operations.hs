@@ -109,7 +109,7 @@ bootstrapUnlessDone pd node =
           else loop
       putMVar initialPingMV True
 
-    readMVar (pdPublicPort pd) >>= \case
+    atomically (readTVar (pdPublicPort pd)) >>= \case
         Nothing   -> return ()
         Just port -> do
           -- Check if we're globally reachable on the specified port.
@@ -120,7 +120,7 @@ bootstrapUnlessDone pd node =
           -- communication that we are.
           when (not reachable) $ do
             putStrLn $ "bootstrap: we are not globally reachable on " ++ show port
-            modifyMVarP_ (pdPublicPort pd) (const Nothing)
+            atomically $ modifyTVarP_ (pdPublicPort pd) (const Nothing)
 
     -- In principle, I believe we could cancel the initial ping if the
     -- global reachability test succeeds. But we don't currently have
@@ -222,7 +222,7 @@ peerLookup pd@PeerDiscovery{..} targetId = do
       -> [(Distance, Node)]
       -> IO ()
     sendFindNodeRequests queue peers = do
-      publicPort <- readMVar pdPublicPort
+      publicPort <- atomically $ readTVar pdPublicPort
       myId <- withMVarP pdRoutingTable rtId
       let findNode = FindNode { fnPeerId = myId
                               , fnPublicPort = publicPort
@@ -401,7 +401,7 @@ performRoutingTableMaintenance :: PeerDiscovery cm -> IO ()
 performRoutingTableMaintenance pd@PeerDiscovery{..} = do
   findNode <- do
     myId <- withMVarP pdRoutingTable rtId
-    port <- readMVar pdPublicPort
+    port <- atomically $ readTVar pdPublicPort
     return $ \nid -> FindNode { fnPeerId     = myId
                               , fnPublicPort = port
                               , fnTargetId   = nid
