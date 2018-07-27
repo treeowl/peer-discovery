@@ -65,76 +65,81 @@ bootstrapUnlessDone
   :: PeerDiscovery cm
   -> Node -- ^ Initial peer
   -> IO Bool
-bootstrapUnlessDone pd node =
+bootstrapUnlessDone pd node = do
+  -- Save the requested public port. If something goes wrong
+  -- (we can't ping the initial peer at all or we receive an exception)
+  -- we restore this.
+  requestedPublicPort <- readMVar (pdPublicPort pd)
   -- If we receive an exception after setting BootstrapInProgress, we need
   -- to be sure to set it back to BootstrapNeeded to unblock any other threads
   -- that are attempting to bootstrap.
-  (`onException` resetBootstrap) $ do
-  bootstrap_still_needed <- atomically $ readTVar (pdBootstrapState pd) >>= \case
-    -- If bootstrapping is already in progress, let it proceed.
-    BootstrapInProgress -> retry
-    -- We are already bootstrapped, so we don't need to do anything.
-    BootstrapDone -> pure False
-    -- The job is ours: bootstrap.
-    BootstrapNeeded -> True <$ writeTVar (pdBootstrapState pd) BootstrapInProgress
-  if not bootstrap_still_needed
-  then return True
-  else do
-    -- Filled with True if the initial ping succeeds; filled with
-    -- False otherwise.
-    initialPingMV <- newEmptyMVar
-
-    -- We do this asynchronously: there's no need to wait for a response
-    -- to the initial ping before sending the one that checks for global
-    -- reachability.
-    sendRequest pd (Ping Nothing) node
-      -- Failed to ping the initial peer. Reset the
-      -- bootstrap state and report failure.
-      (putMVar initialPingMV False) $
-      -- Successfully pinged the initial peer.
-      \Pong -> do
-      -- We successfully contacted (and thus authenticated) the initial peer, so
-      -- it's safe to insert him into the routing table.
-      modifyMVarP_ (pdRoutingTable pd) $ unsafeInsertPeer (pdConfig pd) node
-      myId <- withMVarP (pdRoutingTable pd) rtId
-      -- Populate our neighbourhood.
-      void $ peerLookup pd myId
-      fix $ \loop -> do
-        targetId <- randomPeerId
-        -- Populate part of the routing table holding nodes far from us.
-        if testPeerIdBit myId 0 /= testPeerIdBit targetId 0
-          then do
-                 _ <- peerLookup pd targetId
-                 return ()
-          else loop
-      putMVar initialPingMV True
-
-    readMVar (pdPublicPort pd) >>= \case
-        Nothing   -> return ()
-        Just port -> do
-          -- Check if we're globally reachable on the specified port.
-          reachable <- sendRequestSync pd (Ping $ Just port) node
-            (return False)
-            (\Pong -> return True)
-          -- If we're not, erase the port so we don't pretend in future
-          -- communication that we are.
-          when (not reachable) $ do
-            putStrLn $ "bootstrap: we are not globally reachable on " ++ show port
-            modifyMVarP_ (pdPublicPort pd) (const Nothing)
-
-    -- In principle, I believe we could cancel the initial ping if the
-    -- global reachability test succeeds. But we don't currently have
-    -- the ability to cancel requests, and I don't know if it's worth the
-    -- trouble.
-    initial_ping_succeeded <- readMVar initialPingMV
-    if not initial_ping_succeeded
-    then resetBootstrap >> return False
-    else do
-      atomically $ writeTVar (pdBootstrapState pd) BootstrapDone
-      return True
-  where
-    resetBootstrap =
+  let
+    resetBootstrap = do
+      modifyMVarP_ (pdPublicPort pd) (const requestedPublicPort)
       atomically $ writeTVar (pdBootstrapState pd) BootstrapNeeded
+  (\(_ :: SomeException) -> False <$ resetBootstrap) `handle` do
+    bootstrap_still_needed <- atomically $ readTVar (pdBootstrapState pd) >>= \case
+      -- If bootstrapping is already in progress, let it proceed.
+      BootstrapInProgress -> retry
+      -- We are already bootstrapped, so we don't need to do anything.
+      BootstrapDone -> pure False
+      -- The job is ours: bootstrap.
+      BootstrapNeeded -> True <$ writeTVar (pdBootstrapState pd) BootstrapInProgress
+    if not bootstrap_still_needed
+    then return True
+    else do
+      -- Filled with True if the initial ping succeeds; filled with
+      -- False otherwise.
+      initialPingMV <- newEmptyMVar
+  
+      -- We do this asynchronously: there's no need to wait for a response
+      -- to the initial ping before sending the one that checks for global
+      -- reachability.
+      sendRequest pd (Ping Nothing) node
+        -- Failed to ping the initial peer. Reset the
+        -- bootstrap state and report failure.
+        (putMVar initialPingMV False) $
+        -- Successfully pinged the initial peer.
+        \Pong -> do
+        -- We successfully contacted (and thus authenticated) the initial peer, so
+        -- it's safe to insert him into the routing table.
+        modifyMVarP_ (pdRoutingTable pd) $ unsafeInsertPeer (pdConfig pd) node
+        myId <- withMVarP (pdRoutingTable pd) rtId
+        -- Populate our neighbourhood.
+        void $ peerLookup pd myId
+        fix $ \loop -> do
+          targetId <- randomPeerId
+          -- Populate part of the routing table holding nodes far from us.
+          if testPeerIdBit myId 0 /= testPeerIdBit targetId 0
+            then do
+                   _ <- peerLookup pd targetId
+                   return ()
+            else loop
+        putMVar initialPingMV True
+  
+      case requestedPublicPort of
+          Nothing   -> return ()
+          Just port -> do
+            -- Check if we're globally reachable on the specified port.
+            reachable <- sendRequestSync pd (Ping $ Just port) node
+              (return False)
+              (\Pong -> return True)
+            -- If we're not, erase the port so we don't pretend in future
+            -- communication that we are.
+            when (not reachable) $ do
+              putStrLn $ "bootstrap: we are not globally reachable on " ++ show port
+              modifyMVarP_ (pdPublicPort pd) (const Nothing)
+  
+      -- In principle, I believe we could cancel the initial ping if the
+      -- global reachability test succeeds. But we don't currently have
+      -- the ability to cancel requests, and I don't know if it's worth the
+      -- trouble.
+      initial_ping_succeeded <- readMVar initialPingMV
+      if not initial_ping_succeeded
+      then resetBootstrap >> return False
+      else do
+        atomically $ writeTVar (pdBootstrapState pd) BootstrapDone
+        return True
 
 ----------------------------------------
 
