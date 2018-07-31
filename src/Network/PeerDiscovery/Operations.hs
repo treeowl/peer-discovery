@@ -77,7 +77,7 @@ bootstrapUnlessDone pd node = do
     resetBootstrap = do
       modifyMVarP_ (pdPublicPort pd) (const requestedPublicPort)
       atomically $ writeTVar (pdBootstrapState pd) BootstrapNeeded
-  (\(_ :: SomeException) -> False <$ resetBootstrap) `handle` do
+  (`onException` resetBootstrap) $ do
     bootstrap_still_needed <- atomically $ readTVar (pdBootstrapState pd) >>= \case
       -- If bootstrapping is already in progress, let it proceed.
       BootstrapInProgress -> retry
