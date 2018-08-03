@@ -26,13 +26,21 @@ import Network.PeerDiscovery.Routing
 import Network.PeerDiscovery.Types
 import Network.PeerDiscovery.Util
 
+-- You can't bootstrap against yourself
+data SelfBootstrapExc = SelfBootstrapExc
+  deriving Show
+instance Exception SelfBootstrapExc
+
 -- | Bootstrap the instance with initial peer. Returns 'True'
 -- if bootstrapping was successful.
 bootstrap
   :: PeerDiscovery cm
   -> Node -- ^ Initial peer
   -> IO Bool
-bootstrap pd node = do
+bootstrap pd node
+  | pdBindAddr pd == nodePeer node
+  = throwIO SelfBootstrapExc
+  | otherwise = do
   -- Why do we have this transaction and then one in bootstrapUnlessDone?
   -- We have two requirements:
   --
